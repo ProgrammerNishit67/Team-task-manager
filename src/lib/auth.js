@@ -1,9 +1,13 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "fallback-secret-do-not-use-in-production"
-);
+/**
+ * Get the JWT secret as a Uint8Array
+ */
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET || "fallback-secret-do-not-use-in-production";
+  return new TextEncoder().encode(secret);
+}
 
 /**
  * Sign a JWT token with user payload
@@ -13,7 +17,7 @@ export async function signToken(payload) {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
-    .sign(JWT_SECRET);
+    .sign(getJwtSecret());
 }
 
 /**
@@ -21,9 +25,10 @@ export async function signToken(payload) {
  */
 export async function verifyToken(token) {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, getJwtSecret());
     return payload;
-  } catch {
+  } catch (err) {
+    console.error("JWT Verification failed:", err.message);
     return null;
   }
 }
@@ -34,15 +39,25 @@ export async function verifyToken(token) {
  */
 export async function getAuthUser(request) {
   // Try Authorization header first
-  const authHeader = request.headers.get("authorization");
+  const authHeader = request?.headers?.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.substring(7);
     return await verifyToken(token);
   }
 
-  // Try cookie
-  const cookieStore = await cookies();
-  const token = cookieStore.get("token")?.value;
+  // Try cookie from request first (more reliable in Route Handlers)
+  let token = request?.cookies?.get("token")?.value;
+
+  // Fallback to global cookies helper
+  if (!token) {
+    try {
+      const cookieStore = await cookies();
+      token = cookieStore.get("token")?.value;
+    } catch (err) {
+      // cookies() can throw if called in the wrong context
+    }
+  }
+
   if (token) {
     return await verifyToken(token);
   }
